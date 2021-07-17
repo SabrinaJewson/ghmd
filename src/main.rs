@@ -42,6 +42,10 @@ struct Opts {
     /// The title of the page. Defaults to the filename.
     #[structopt(long)]
     title: Option<String>,
+
+    /// The port the server should bind to.
+    #[structopt(short, long, default_value = "39131")]
+    port: u16,
 }
 
 #[tokio::main]
@@ -68,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let http = Http::new();
-    let listener = TcpListener::bind("0.0.0.0:39131")
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", opts.port))
         .await
         .context("failed to bind server")?;
 
