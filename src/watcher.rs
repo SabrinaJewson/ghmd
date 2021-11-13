@@ -17,7 +17,7 @@ pub(crate) async fn watch_file(
     let initial_contents = <Arc<str>>::from(fs::read_to_string(&path).await?);
 
     let modified = Arc::new(Notify::new());
-    let mut watcher = notify::immediate_watcher({
+    let mut watcher = notify::recommended_watcher({
         let path = path.clone();
         let modified = modified.clone();
         move |event: notify::Result<notify::Event>| {
