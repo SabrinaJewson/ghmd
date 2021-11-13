@@ -176,10 +176,10 @@ impl Server {
                             "\
                                 Rate Limited\n\
                                 ============\n\
-
+                                \
                                 You have used your quota of {} requests and are now rate limited\
                                 by the GitHub API.\n\
-
+                                \
                                 You may continue to send requests in {:?}.\
                             ",
                             limit, time,
@@ -225,7 +225,7 @@ impl Server {
                     "\
                             Internal Server Error\n\
                             =====================\n\
-
+                            \
                             {:?}\
                         ",
                     e,
