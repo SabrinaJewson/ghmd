@@ -38,7 +38,7 @@ pub(crate) async fn watch_file(
         }
     })?;
     let dir = path.parent().context("file has no parent")?;
-    watcher.watch(&dir, notify::RecursiveMode::Recursive)?;
+    watcher.watch(dir, notify::RecursiveMode::Recursive)?;
 
     let (sender, receiver) = watch::channel(Ok(initial_contents.clone()));
 

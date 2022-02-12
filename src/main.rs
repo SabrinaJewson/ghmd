@@ -7,11 +7,11 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Context as _};
 use async_stream::try_stream;
+use clap::Parser;
 use hyper::http;
 use hyper::server::conn::Http;
 use hyper::service::service_fn;
 use serde::Serialize;
-use structopt::StructOpt;
 use tera::Tera;
 use tokio::net::TcpListener;
 use tokio::signal;
@@ -23,28 +23,28 @@ mod watcher;
 mod renderer;
 use renderer::{RateLimited, Renderer};
 
-#[derive(StructOpt)]
-#[structopt(name = "ghmd", about = "GitHub Markdown previewer")]
-struct Opts {
+#[derive(Parser)]
+#[clap(name = "ghmd", about = "GitHub Markdown previewer")]
+struct Args {
     /// The markdown file to render.
-    #[structopt(parse(from_os_str))]
+    #[clap(parse(from_os_str))]
     input: PathBuf,
 
     /// The authorization token to use. You can create a personal one at
     /// <https://github.com/settings/tokens>.
-    #[structopt(short, long)]
+    #[clap(short, long)]
     token: String,
 
     /// The theme to generate the resulting page using.
-    #[structopt(long, possible_values = &["dark", "light"], default_value = "dark", case_insensitive = true)]
+    #[clap(long, possible_values = &["dark", "light"], default_value = "dark", ignore_case = true)]
     theme: String,
 
     /// The title of the page. Defaults to the filename.
-    #[structopt(long)]
+    #[clap(long)]
     title: Option<String>,
 
     /// The port the server should bind to.
-    #[structopt(short, long, default_value = "39131")]
+    #[clap(short, long, default_value = "39131")]
     port: u16,
 }
 
@@ -53,26 +53,26 @@ async fn main() -> anyhow::Result<()> {
     std::env::set_var("RUST_LOG", "INFO");
     pretty_env_logger::init();
 
-    let opts = Opts::from_args();
+    let args = Args::parse();
 
     let mut template = Tera::default();
     template.autoescape_on(Vec::new());
     template.add_raw_template("html", include_str!("template.html"))?;
 
     let server = Arc::new(Server {
-        renderer: Renderer::new(reqwest::Client::new(), opts.token),
-        watcher: watcher::watch_file(&opts.input).await?,
+        renderer: Renderer::new(reqwest::Client::new(), args.token),
+        watcher: watcher::watch_file(&args.input).await?,
         shutdown: Notify::new(),
-        title: match opts.title {
+        title: match args.title {
             Some(title) => title.into(),
-            None => opts.input.to_string_lossy().into(),
+            None => args.input.to_string_lossy().into(),
         },
         template,
-        theme: Box::from(opts.theme),
+        theme: Box::from(args.theme),
     });
 
     let http = Http::new();
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", opts.port))
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", args.port))
         .await
         .context("failed to bind server")?;
 
