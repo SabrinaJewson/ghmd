@@ -14,12 +14,10 @@ use tokio::runtime;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 
-type Sha512Output = sha2::digest::generic_array::GenericArray<u8, <Sha512 as Digest>::OutputSize>;
-
 pub(crate) struct Renderer {
     client: reqwest::Client,
     token: Box<str>,
-    cache: Mutex<HashMap<Sha512Output, Arc<str>>>,
+    cache: Mutex<HashMap<sha2::digest::Output<Sha512>, Arc<str>>>,
     octicons: Octicons,
 }
 
@@ -55,7 +53,7 @@ impl Renderer {
             .header("Accept", "application/vnd.github.v3+json")
             .header("User-Agent", "markdown previewer")
             .bearer_auth(&self.token)
-            .json(&Body { text: &markdown })
+            .json(&Body { text: markdown })
             .send()
             .await?;
 

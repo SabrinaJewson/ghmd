@@ -26,7 +26,7 @@ API. Changes to the file will automatically cause the rendered page to be refres
 ## Installation
 
 ```sh
-cargo install --git https://github.com/KaiJewson/ghmd
+cargo install --git https://github.com/SabrinaJewson/ghmd
 ```
 
 ## See also
