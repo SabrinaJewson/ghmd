@@ -1,9 +1,9 @@
 use std::convert::Infallible;
 use std::error::Error as StdError;
 use std::fmt::{self, Debug, Display, Formatter};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use anyhow::{anyhow, Context as _};
 use async_stream::try_stream;
@@ -12,19 +12,22 @@ use hyper::http;
 use hyper::server::conn::Http;
 use hyper::service::service_fn;
 use serde::Serialize;
-use tera::Tera;
 use tokio::net::TcpListener;
-use tokio::signal;
 use tokio::sync::watch;
 use tokio::sync::Notify;
+use tokio::{fs, signal};
 
 mod watcher;
 
 mod renderer;
 use renderer::{RateLimited, Renderer};
 
+mod templater;
+use templater::{Liveness, Templater, Theme};
+
 #[derive(Parser)]
-#[clap(name = "ghmd", about = "GitHub Markdown previewer")]
+#[clap(about = "GitHub Markdown previewer")]
+#[clap(group(clap::ArgGroup::new("action").args(&["port", "output"])))]
 struct Args {
     /// The markdown file to render.
     #[clap(parse(from_os_str))]
@@ -36,8 +39,8 @@ struct Args {
     token: String,
 
     /// The theme to generate the resulting page using.
-    #[clap(long, possible_values = &["dark", "light"], default_value = "dark", ignore_case = true)]
-    theme: String,
+    #[clap(long, arg_enum, ignore_case = true, default_value_t)]
+    theme: Theme,
 
     /// The title of the page. Defaults to the filename.
     #[clap(long)]
@@ -46,6 +49,11 @@ struct Args {
     /// The port the server should bind to.
     #[clap(short, long, default_value = "39131")]
     port: u16,
+
+    /// The HTML file to generate. If this is specified, no server will be started and instead a
+    /// single static file will be produced.
+    #[clap(short, long)]
+    output: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -55,24 +63,57 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    let mut template = Tera::default();
-    template.autoescape_on(Vec::new());
-    template.add_raw_template("html", include_str!("template.html"))?;
+    let renderer = Renderer::new(reqwest::Client::new(), args.token);
+    let templater = Templater::new(
+        args.title
+            .map(String::into_boxed_str)
+            .unwrap_or_else(|| args.input.to_string_lossy().into()),
+        args.theme,
+    );
 
+    if let Some(output) = args.output {
+        gen_output(&args.input, renderer, templater, &output).await?;
+    } else {
+        run_server(&args.input, renderer, templater, args.port).await?;
+    }
+
+    Ok(())
+}
+
+async fn gen_output(
+    input: &Path,
+    renderer: Renderer,
+    templater: Templater,
+    output: &Path,
+) -> anyhow::Result<()> {
+    let markdown = fs::read_to_string(input).await?;
+    let rendered = renderer.render(&markdown).await??;
+    let page = templater.generate(&rendered, Liveness::Static).await?;
+    if output.to_str() == Some("-") {
+        print!("{}", page);
+    } else {
+        fs::write(output, page)
+            .await
+            .context("could not write to output file")?;
+    }
+    Ok(())
+}
+
+async fn run_server(
+    input: &Path,
+    renderer: Renderer,
+    templater: Templater,
+    port: u16,
+) -> anyhow::Result<()> {
     let server = Arc::new(Server {
-        renderer: Renderer::new(reqwest::Client::new(), args.token),
-        watcher: watcher::watch_file(&args.input).await?,
+        renderer,
+        templater,
+        watcher: watcher::watch_file(&input).await?,
         shutdown: Notify::new(),
-        title: match args.title {
-            Some(title) => title.into(),
-            None => args.input.to_string_lossy().into(),
-        },
-        template,
-        theme: Box::from(args.theme),
     });
 
     let http = Http::new();
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", args.port))
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
         .await
         .context("failed to bind server")?;
 
@@ -131,11 +172,9 @@ async fn main() -> anyhow::Result<()> {
 
 struct Server {
     renderer: Renderer,
+    templater: Templater,
     watcher: watch::Receiver<anyhow::Result<Arc<str>>>,
     shutdown: Notify,
-    title: Box<str>,
-    theme: Box<str>,
-    template: Tera,
 }
 
 impl Server {
@@ -155,19 +194,12 @@ impl Server {
     }
 
     async fn get(&self) -> hyper::Response<hyper::Body> {
-        let res = async move {
-            let markdown = match &*self.watcher.borrow() {
-                Ok(markdown) => markdown.clone(),
-                Err(e) => return Err(clone_error(e)),
-            };
+        let res: anyhow::Result<_> = async move {
+            let markdown = self.watcher.borrow().as_ref().map_err(clone_error)?.clone();
 
             let rendered = match self.renderer.render(&markdown).await? {
                 Ok(rendered) => rendered,
-                Err(RateLimited { limit, reset }) => {
-                    let time = reset
-                        .duration_since(SystemTime::now())
-                        .unwrap_or_else(|_| Duration::default());
-
+                Err(rate_limited) => {
                     // TODO: handle errors better
                     return Ok(http::Response::builder()
                         .status(http::StatusCode::FORBIDDEN)
@@ -177,37 +209,15 @@ impl Server {
                                 Rate Limited\n\
                                 ============\n\
                                 \
-                                You have used your quota of {} requests and are now rate limited\
-                                by the GitHub API.\n\
-                                \
-                                You may continue to send requests in {:?}.\
+                                {}
                             ",
-                            limit, time,
+                            rate_limited,
                         )))
                         .unwrap());
                 }
             };
 
-            #[derive(Serialize)]
-            struct HtmlTemplateOpts<'a> {
-                title: &'a str,
-                content: &'a str,
-                theme: &'a str,
-                javascript: &'a str,
-            }
-            let page = self
-                .template
-                .render(
-                    "html",
-                    &tera::Context::from_serialize(HtmlTemplateOpts {
-                        title: &self.title,
-                        content: &rendered,
-                        theme: &self.theme,
-                        javascript: include_str!("template.js"),
-                    })
-                    .unwrap(),
-                )
-                .context("failed to render template")?;
+            let page = self.templater.generate(&rendered, Liveness::Live).await?;
 
             Ok(http::Response::builder()
                 .status(http::StatusCode::OK)

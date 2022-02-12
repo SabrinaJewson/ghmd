@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::error::Error;
+use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -121,10 +123,33 @@ where
     Ok(value.to_str()?.parse()?)
 }
 
+#[derive(Debug)]
 pub(crate) struct RateLimited {
     pub(crate) limit: u32,
     pub(crate) reset: SystemTime,
 }
+
+impl Display for RateLimited {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let time = self
+            .reset
+            .duration_since(SystemTime::now())
+            .unwrap_or_else(|_| Duration::default());
+
+        write!(
+            f,
+            "\
+                You have used your quota of {} requests and are now rate limited\
+                by the GitHub API.\n\
+                \n\
+                You may continue to send requests in {:?}.\
+            ",
+            self.limit, time,
+        )
+    }
+}
+
+impl Error for RateLimited {}
 
 struct Octicons {
     client: reqwest::Client,
