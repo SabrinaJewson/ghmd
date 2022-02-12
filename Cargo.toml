@@ -7,9 +7,9 @@ publish = false
 [dependencies]
 anyhow = "1.0.42"
 async-stream = "0.3.2"
-clap = { version = "3.0.14", features = ["derive"] }
+clap = { version = "3.0.14", features = ["derive", "env"] }
 fn-error-context = "0.2.0"
-hyper = { version=  "0.14.10", features = ["server", "stream"] }
+hyper = { version = "0.14.10", features = ["server", "stream"] }
 log = "0.4.14"
 notify = "5.0.0-pre.13"
 pretty_env_logger = "0.4.0"

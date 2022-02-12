@@ -35,7 +35,7 @@ struct Args {
 
     /// The authorization token to use. You can create a personal one at
     /// <https://github.com/settings/tokens>.
-    #[clap(short, long)]
+    #[clap(short, long, env = "GITHUB_TOKEN")]
     token: String,
 
     /// The theme to generate the resulting page using.

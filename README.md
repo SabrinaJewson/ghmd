@@ -13,7 +13,7 @@ OPTIONS:
                              started and instead a single static file will be produced
     -p, --port <PORT>        The port the server should bind to [default: 39131]
     -t, --token <TOKEN>      The authorization token to use. You can create a personal one at
-                             <https://github.com/settings/tokens>
+                             <https://github.com/settings/tokens> [env: GITHUB_TOKEN=]
         --theme <THEME>      The theme to generate the resulting page using [default: dark]
                              [possible values: dark, light]
         --title <TITLE>      The title of the page. Defaults to the filename
